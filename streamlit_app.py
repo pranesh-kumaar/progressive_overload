@@ -1,9 +1,13 @@
+from contextlib import contextmanager
 from datetime import datetime
 from html import escape
+import os
 from pathlib import Path
 import sqlite3
 
+import psycopg
 import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
 
 
 st.set_page_config(
@@ -27,10 +31,122 @@ MUSCLE_GROUPS = {
 }
 DATABASE_PATH = Path(__file__).with_name("workouts.sqlite3")
 
+try:
+    DATABASE_URL = st.secrets.get("SUPABASE_DB_URL")
+except StreamlitSecretNotFoundError:
+    DATABASE_URL = None
+DATABASE_URL = DATABASE_URL or os.environ.get("SUPABASE_DB_URL")
+
+
+@contextmanager
+def database_connection():
+    if DATABASE_URL:
+        with psycopg.connect(DATABASE_URL) as connection:
+            yield connection
+    else:
+        connection = sqlite3.connect(DATABASE_PATH)
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
+
+def execute_query(connection, query, parameters=()):
+    if DATABASE_URL:
+        query = query.replace("?", "%s")
+    return connection.execute(query, parameters)
+
+
+def initialize_database():
+    if DATABASE_URL:
+        with database_connection() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS workout_sets (
+                    id BIGSERIAL PRIMARY KEY,
+                    exercise TEXT NOT NULL,
+                    muscle_group TEXT NOT NULL,
+                    weight DOUBLE PRECISION NOT NULL,
+                    reps INTEGER NOT NULL,
+                    logged_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS custom_exercises (
+                    id BIGSERIAL PRIMARY KEY,
+                    muscle_group TEXT NOT NULL,
+                    exercise TEXT NOT NULL,
+                    UNIQUE (muscle_group, exercise)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS exercise_targets (
+                    muscle_group TEXT NOT NULL,
+                    exercise TEXT NOT NULL,
+                    target_load DOUBLE PRECISION,
+                    PRIMARY KEY (muscle_group, exercise)
+                )
+                """
+            )
+        return
+
+    with database_connection() as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workout_sets (
+                id INTEGER PRIMARY KEY,
+                exercise TEXT NOT NULL,
+                muscle_group TEXT NOT NULL,
+                weight REAL NOT NULL,
+                reps INTEGER NOT NULL,
+                logged_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS custom_exercises (
+                id INTEGER PRIMARY KEY,
+                muscle_group TEXT NOT NULL,
+                exercise TEXT NOT NULL,
+                UNIQUE (muscle_group, exercise)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS exercise_targets (
+                muscle_group TEXT NOT NULL,
+                exercise TEXT NOT NULL,
+                target_load REAL,
+                PRIMARY KEY (muscle_group, exercise)
+            )
+            """
+        )
+        target_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(exercise_targets)")
+        }
+        if "target_load" not in target_columns:
+            connection.execute("ALTER TABLE exercise_targets ADD COLUMN target_load REAL")
+
+
+initialize_database()
+if not DATABASE_URL:
+    st.warning(
+        "Using local SQLite storage. For workout data that survives hosted-app "
+        "restarts, add SUPABASE_DB_URL to the app's Streamlit secrets."
+    )
+
 
 def load_workout_sets():
-    with sqlite3.connect(DATABASE_PATH) as connection:
-        rows = connection.execute(
+    with database_connection() as connection:
+        rows = execute_query(
+            connection,
             "SELECT exercise, muscle_group, weight, reps, logged_at FROM workout_sets ORDER BY id"
         ).fetchall()
     return [
@@ -40,8 +156,9 @@ def load_workout_sets():
 
 
 def load_custom_exercises():
-    with sqlite3.connect(DATABASE_PATH) as connection:
-        rows = connection.execute(
+    with database_connection() as connection:
+        rows = execute_query(
+            connection,
             "SELECT muscle_group, exercise FROM custom_exercises ORDER BY id"
         ).fetchall()
     for group, exercise in rows:
@@ -49,51 +166,13 @@ def load_custom_exercises():
 
 
 def load_exercise_targets():
-    with sqlite3.connect(DATABASE_PATH) as connection:
-        rows = connection.execute(
+    with database_connection() as connection:
+        rows = execute_query(
+            connection,
             "SELECT muscle_group, exercise, target_load FROM exercise_targets WHERE target_load IS NOT NULL"
         ).fetchall()
     return {(group, exercise): {"load": load} for group, exercise, load in rows}
 
-
-with sqlite3.connect(DATABASE_PATH) as connection:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS workout_sets (
-            id INTEGER PRIMARY KEY,
-            exercise TEXT NOT NULL,
-            muscle_group TEXT NOT NULL,
-            weight REAL NOT NULL,
-            reps INTEGER NOT NULL,
-            logged_at TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS custom_exercises (
-            id INTEGER PRIMARY KEY,
-            muscle_group TEXT NOT NULL,
-            exercise TEXT NOT NULL,
-            UNIQUE (muscle_group, exercise)
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS exercise_targets (
-            muscle_group TEXT NOT NULL,
-            exercise TEXT NOT NULL,
-            target_load REAL,
-            PRIMARY KEY (muscle_group, exercise)
-        )
-        """
-    )
-    target_columns = {
-        row[1] for row in connection.execute("PRAGMA table_info(exercise_targets)")
-    }
-    if "target_load" not in target_columns:
-        connection.execute("ALTER TABLE exercise_targets ADD COLUMN target_load REAL")
 load_custom_exercises()
 
 st.markdown(
@@ -102,7 +181,7 @@ st.markdown(
     @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap');
     :root {
       --ink: #172820;
-      --muted: #738078;
+      --muted: #657168;
       --paper: #f4f6f0;
       --green: #b6ef63;
       --line: #dce3d9;
@@ -150,7 +229,7 @@ st.markdown(
     .set-row {display:grid; grid-template-columns:36px 1fr 1fr 1fr; align-items:center; gap:.65rem; border-top:1px solid #edf0eb; padding:.7rem 0; font-size:.8rem;}
     .set-number {font:500 .68rem 'DM Mono',monospace; color:var(--muted);}
     .set-value {font:500 .8rem 'DM Mono',monospace;}
-    .set-head {color:#87928a; font:400 .62rem 'DM Mono',monospace; text-transform:uppercase; padding-bottom:.45rem;}
+    .set-head {color:#68736b; font:400 .62rem 'DM Mono',monospace; text-transform:uppercase; padding-bottom:.45rem;}
     .empty-note {font-size:.82rem; color:var(--muted); padding:.8rem 0 .2rem;}
     .history-row {display:flex; justify-content:space-between; border-bottom:1px solid var(--line); padding:.8rem 0; font-size:.82rem;}
     .history-row:last-child {border-bottom:0;}
@@ -162,6 +241,7 @@ st.markdown(
     div[data-testid="stNumberInput"] button {min-height:unset;}
     div[data-testid="stTabs"] [role="tab"] {font-weight:600;}
     .st-key-muscle-groups [data-testid="stHorizontalBlock"] { flex-wrap:wrap; }
+    .st-key-mobile-muscle-group-picker { display:none; }
     @media(max-width:700px) {
       .block-container {padding:1.1rem 1rem 3rem;}
       .brand-row {margin-bottom:2rem;}
@@ -177,7 +257,8 @@ st.markdown(
             .latest-workout-table {table-layout:fixed;}
             .latest-workout-table th, .latest-workout-table td {padding:.45rem .25rem; font-size:.68rem;}
             .latest-workout-table .exercise-cell {font-size:.7rem;}
-            .st-key-muscle-groups [data-testid="column"] { flex:1 1 calc(50% - .5rem) !important; min-width:calc(50% - .5rem); }
+            .st-key-muscle-groups { display:none; }
+            .st-key-mobile-muscle-group-picker { display:block; }
     }
     </style>
     """,
@@ -247,8 +328,9 @@ def training_workspace():
                 elif any(existing.casefold() == new_exercise.casefold() for existing in MUSCLE_GROUPS[new_group]):
                     st.warning("That exercise is already in this muscle group.")
                 else:
-                    with sqlite3.connect(DATABASE_PATH) as connection:
-                        connection.execute(
+                    with database_connection() as connection:
+                        execute_query(
+                            connection,
                             "INSERT INTO custom_exercises (muscle_group, exercise) VALUES (?, ?)",
                             (new_group, new_exercise),
                         )
@@ -256,7 +338,20 @@ def training_workspace():
                     st.session_state.selected_group = new_group
                     st.session_state[f"exercise_{new_group}"] = new_exercise
                     st.session_state.selected_exercise = new_exercise
+                    selected_group = new_group
                     st.success(f"Added {new_exercise} to {new_group}.")
+
+    with st.container(key="mobile-muscle-group-picker"):
+        mobile_group = st.selectbox(
+            "Muscle group",
+            groups,
+            index=groups.index(selected_group),
+            key=f"mobile_group_select_{selected_group}",
+        )
+    if mobile_group != selected_group:
+        selected_group = mobile_group
+        st.session_state.selected_group = mobile_group
+        st.session_state.selected_exercise = MUSCLE_GROUPS[mobile_group][0]
 
     with st.container(key="muscle-groups"):
         for start in range(0, len(groups), 5):
@@ -271,6 +366,7 @@ def training_workspace():
                     ):
                         st.session_state.selected_group = group
                         st.session_state.selected_exercise = MUSCLE_GROUPS[group][0]
+                        selected_group = group
 
     with st.expander(f"Set target load for {selected_group} exercises"):
         with st.form(f"target_form_{selected_group}"):
@@ -294,8 +390,9 @@ def training_workspace():
             )
             save_target = st.form_submit_button("Save target", use_container_width=True)
         if save_target:
-            with sqlite3.connect(DATABASE_PATH) as connection:
-                connection.execute(
+            with database_connection() as connection:
+                execute_query(
+                    connection,
                     """
                     INSERT INTO exercise_targets (muscle_group, exercise, target_load)
                     VALUES (?, ?, ?)
@@ -406,8 +503,9 @@ def training_workspace():
             reps = st.number_input("Reps", min_value=1, max_value=100, value=default_reps, step=1, key=f"reps_{exercise}")
         if st.button("＋  Log set", type="primary", use_container_width=True, key="log_set"):
             entry = {"exercise": exercise, "group": st.session_state.selected_group, "weight": weight, "reps": reps, "date": datetime.now().strftime("%Y-%m-%d %H:%M")}
-            with sqlite3.connect(DATABASE_PATH) as connection:
-                connection.execute(
+            with database_connection() as connection:
+                execute_query(
+                    connection,
                     "INSERT INTO workout_sets (exercise, muscle_group, weight, reps, logged_at) VALUES (?, ?, ?, ?, ?)",
                     (entry["exercise"], entry["group"], entry["weight"], entry["reps"], entry["date"]),
                 )
