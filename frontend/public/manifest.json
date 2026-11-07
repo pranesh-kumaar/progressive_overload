@@ -1,6 +1,6 @@
 {
-  "name": "Overload",
-  "short_name": "Overload",
+  "name": "overload.",
+  "short_name": "overload.",
   "description": "Personal training log and workout tracker",
   "start_url": "./",
   "scope": "./",
