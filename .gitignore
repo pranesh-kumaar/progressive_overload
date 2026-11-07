@@ -163,3 +163,17 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# OpenGym runtime data and frontend build artifacts
+data/
+coach-auth/
+node_modules/
+frontend/dist/
+frontend/bundle-size.json
+coverage/
+junit.xml
+*.log
+
+# Keep the original local workout data and secrets out of commits
+.streamlit/secrets.toml
+node_modules
