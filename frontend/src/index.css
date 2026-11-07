@@ -245,6 +245,8 @@ button.conn:active{filter:brightness(1.12)}
 .hdr>.hdr-actions{display:flex;align-items:center;gap:8px;flex:none}
 .hdr h1{font-size:34px;line-height:1.06;font-weight:700;letter-spacing:-.028em;overflow-wrap:break-word}
 @media (max-width:420px){.hdr h1{font-size:30px}}
+.hdr h1.home-brand{display:flex;align-items:center;gap:8px}
+.hdr h1.home-brand img{width:32px;height:32px;border-radius:7px;flex:none}
 .hdr .sub{color:var(--label-2);font-size:15px;letter-spacing:-.006em;margin-top:4px}
 /* Library: the count line runs under the title row at full width instead of beside the "By muscle"
    button, which left it ~200px on a phone: the catalogue count plus your own exercises stays one

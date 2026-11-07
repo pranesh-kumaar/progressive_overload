@@ -30,6 +30,13 @@ const mountWith = showWeightCard => {
 const weightHeading = () => [...host.querySelectorAll('h2')].find(el => el.textContent === 'Body weight')
 
 describe('Home body-weight card preference', () => {
+  it('shows the overload brand and arrow mark when there is no signed-in user', () => {
+    mountWith(undefined)
+    const heading = host.querySelector('.hdr h1')
+    expect(heading.textContent).toBe('overload.')
+    expect(heading.querySelector('img').getAttribute('src')).toBe('overload-icon.svg')
+  })
+
   it('shows the card for legacy profiles without the preference', () => {
     mountWith(undefined)
     expect(weightHeading()).toBeTruthy()
